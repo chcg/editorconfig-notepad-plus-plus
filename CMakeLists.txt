@@ -28,7 +28,7 @@ set (editorconfig_notepad_plus_plus__VERSION_SUBMINOR 1)
 # set the EDITORCONFIG_CORE_PREFIX. Default is the default installation
 # directory of editorconfig
 if(WIN32)
-    set(EDITORCONFIG_CORE_DEFAULT_PREFIX "C:/Program Files/editorconfig")
+    set(EDITORCONFIG_CORE_DEFAULT_PREFIX "./editorconfig-core-c")
 endif()
 
 # if the default path does not exist, set it to empty string

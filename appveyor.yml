@@ -1,0 +1,118 @@
+version: 0.3.1.{build}
+image: Visual Studio 2015
+
+environment:
+    matrix:
+        - PlatformToolset: v140_xp
+        #- PlatformToolset: v120_xp
+        #- PlatformToolset: mingw-w64
+
+platform:
+    - x64
+    #- x86
+
+configuration:
+    - Release
+    #- Debug
+
+install:
+    - git clone -q https://github.com/editorconfig/editorconfig-core-c.git "%APPVEYOR_BUILD_FOLDER%"\editorconfig-core-c
+    - set EDITORCONFIG_CORE_DEFAULT_PREFIX="%APPVEYOR_BUILD_FOLDER%"\editorconfig-core-c
+    - if "%platform%"=="x64" set archi=amd64
+    - if "%platform%"=="x86" set archi=x86
+    - call "C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\vcvarsall.bat" %archi%
+
+    - ps: |
+        if ($env:PLATFORMTOOLSET -match "mingw-w64") {
+            $env:Path += ";C:\mingw-w64\i686-5.3.0-posix-dwarf-rt_v4-rev0\mingw32\bin"
+            $env:Path += ";C:\mingw-w64\i686-5.3.0-posix-dwarf-rt_v4-rev0\mingw32\i686-w64-mingw32\lib"
+            $env:Path = $env:Path.Replace('C:\Program Files\Git\usr\bin;','')
+            g++ --version
+            mingw32-make --version
+        }
+build:
+    parallel: true
+    verbosity: minimal
+
+before_build:
+- ps: |
+    Write-Output "Configuration: $env:CONFIGURATION"
+    Write-Output "Platform: $env:PLATFORM"
+    $generator = switch ($env:PLATFORMTOOLSET)
+    {
+        "v140_xp" {"Visual Studio 14 2015"}
+        "v120_xp" {"Visual Studio 12 2013"}
+        "mingw-w64" {"MinGW Makefiles"}
+    }
+    # not applicable with MinGW Makefiles generator
+    if ($env:PLATFORM -eq "x64" -and $env:PLATFORMTOOLSET -notmatch "mingw-w64")
+    {
+        $generator = "$generator Win64"
+    }
+    # cmake build type, depended on the used generator, see https://cmake.org/cmake/help/v3.6/variable/CMAKE_BUILD_TYPE.html#variable:CMAKE_BUILD_TYPE
+    if ($env:PLATFORMTOOLSET -match "mingw-w64")
+    {
+        $build_type = "-DCMAKE_BUILD_TYPE=$env:CONFIGURATION"
+        $build_config = ""
+    }
+    else
+    {
+        # seems vs build always needs also the debug config, choose via the config option to the build command
+        $build_type = "-DCMAKE_CONFIGURATION_TYPES=""Debug;Release"" "
+        $build_config = "--config $env:CONFIGURATION"
+    }
+    Write-Output "build_type: $build_type"
+    Write-Output "build_config: $build_config"
+
+build_script:
+- cd "%APPVEYOR_BUILD_FOLDER%"
+- ps: |
+    md _build -Force | Out-Null
+    cd _build
+    & cmake -G "$generator" $build_type ..
+    if ($LastExitCode -ne 0) {
+        throw "Exec: $ErrorMessage"
+    }
+    & cmake --build . --config $env:CONFIGURATION
+    if ($LastExitCode -ne 0) {
+        throw "Exec: $ErrorMessage"
+    }
+
+after_build:
+- cd "%APPVEYOR_BUILD_FOLDER%"
+- ps: |
+
+    if ($env:PLATFORMTOOLSET -ne "mingw-w64")
+    {
+        $NppEditorConfig_unicodeFileName = "NppEditorConfig_unicode.$env:PLATFORM.$env:CONFIGURATION.$env:PLATFORMTOOLSET.dll"
+        Push-AppveyorArtifact "_build\$env:CONFIGURATION\NppEditorConfig_unicode.dll" -FileName "$NppEditorConfig_unicodeFileName"
+
+        if ($($env:APPVEYOR_REPO_TAG) -eq "true" -and $env:PLATFORMTOOLSET -eq "v120_xp" -and $env:CONFIGURATION -eq "Release")
+        {
+            $ZipFileName = "NppEditorConfig_unicode_$($env:APPVEYOR_REPO_TAG_NAME)_$env:PLATFORM.zip"
+            md deploy -Force | Out-Null
+            md deploy\NppEditorConfig_unicode -Force | Out-Null
+            Copy-Item _build\$env:CONFIGURATION\NppEditorConfig_unicode.dll deploy\NppEditorConfig_unicode.dll
+            Copy-Item bin\NppEditorConfig_unicode\*.* deploy\NppEditorConfig_unicode\
+            7z a $ZipFileName .\deploy\*
+            Remove-Item deploy\NppEditorConfig_unicode.dll
+            Remove-Item deploy\NppEditorConfig_unicode\*.*
+        }
+    }
+
+artifacts:
+  - path: NppEditorConfig_unicode_*.zip
+    name: releases
+
+deploy:
+    provider: GitHub
+    auth_token:
+        secure: !!TODO, see https://www.appveyor.com/docs/deployment/github/#provider-settings!!
+    artifact: releases
+    draft: false
+    prerelease: false
+    force_update: true
+    on:
+        appveyor_repo_tag: true
+        PlatformToolset: v120_xp
+        configuration: Release
